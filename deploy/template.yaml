@@ -303,7 +303,7 @@ Resources:
         MinimumHealthyPercent: !Ref ApplicationMinCapacity
       PlatformVersion: "LATEST"
       DeploymentController:
-        Type: CODE_DEPLOY
+        Type: EXTERNAL
       ServiceConnectConfiguration:
         Enabled: false
       EnableECSManagedTags: true
@@ -312,80 +312,6 @@ Resources:
           Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
         - Key: "environment"
           Value: !Ref ApplicationEnvironmentType
-  LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Ref 'ServiceName'
-      RetentionInDays: 7
-      Tags:
-        - Key: "application"
-          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
-        - Key: "environment"
-          Value: !Ref ApplicationEnvironmentType
-  CodeDeployApplication:
-    Type: 'AWS::CodeDeploy::Application'
-    Properties:
-      ApplicationName: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}-blue'
-      ComputePlatform: "ECS"
-      Tags:
-        - Key: "environment"
-          Value: !Ref ApplicationEnvironmentType
-  CodeDeployDeploymentGroup:
-    Type: 'AWS::CodeDeploy::DeploymentGroup'
-    DependsOn:
-      - CodeDeployApplication
-      - ALBTargetGroupBlue
-      - ALBTargetGroupGreen
-      - ECSApiCluster
-      - ECSApiService
-    Properties:
-      ApplicationName: !Ref CodeDeployApplication
-      DeploymentGroupName: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}-blue'
-      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
-      AutoRollbackConfiguration:
-        Enabled: true
-        Events:
-          - DEPLOYMENT_FAILURE
-      DeploymentStyle:
-        DeploymentOption: WITH_TRAFFIC_CONTROL
-        DeploymentType: BLUE_GREEN
-      OutdatedInstancesStrategy: UPDATE
-      BlueGreenDeploymentConfiguration:
-        DeploymentReadyOption:
-          ActionOnTimeout: CONTINUE_DEPLOYMENT
-          WaitTimeInMinutes: 0
-        TerminateBlueInstancesOnDeploymentSuccess:
-          Action: TERMINATE
-          TerminationWaitTimeInMinutes: 5
-      LoadBalancerInfo:
-        TargetGroupPairInfoList:
-          - TargetGroups:
-              - Name: !Ref ALBTargetGroupBlue
-              - Name: !Ref ALBTargetGroupGreen
-            ProdTrafficRoute:
-              ListenerArns:
-                - Fn::ImportValue:
-                    Fn::Sub: '${CommonStackName}-CommonTrafficRule'
-      ECSServices:
-        - ClusterName: !Ref ECSApiCluster
-          ServiceName: !Ref ServiceName
-      ServiceRoleArn:
-        Fn::GetAtt: CodeDeployServiceRole.Arn
-  CodeDeployServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - codedeploy.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
-        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
   BlueTaskSet:
     Type: 'AWS::ECS::TaskSet'
     DependsOn:
