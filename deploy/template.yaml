@@ -272,59 +272,6 @@ Resources:
           Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
         - Key: "environment"
           Value: !Ref ApplicationEnvironmentType
-  GreenTaskDefinition:
-    Type: 'AWS::ECS::TaskDefinition'
-    UpdateReplacePolicy: Retain
-    Properties:
-      ExecutionRoleArn: !GetAtt
-        - ECSTaskExecutionRole
-        - Arn
-      TaskRoleArn: !Ref ApplicationTaskRoleArn
-      ContainerDefinitions:
-        - Name: !Ref ContainerName
-          Image: !Ref ImageUrl
-          Essential: true
-          PortMappings:
-            - HostPort: 80
-              Protocol: tcp
-              ContainerPort: 80
-              AppProtocol: http
-              Name: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
-          Environment:
-            - Name: APP_ENV
-              Value: !Ref AppEnv
-            - Name: CACHE_DRIVER
-              Value: !Ref AppCacheDriver
-            - Name: QUEUE_CONNECTION
-              Value: !Ref AppQueueConnection
-            - Name: REDIS_HOST
-              Value: !Ref AppRedisHost
-            - Name: REDIS_PORT
-              Value: !Ref AppRedisPort
-            - Name: SECRET_MANAGER_ID
-              Value: !Ref AppSecretManagerId
-            - Name: LOG_CHANNEL
-              Value: 'stderr'
-          LogConfiguration:
-            LogDriver: 'awslogs'
-            Options:
-              awslogs-group: !Ref 'ServiceName'
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: !Ref 'ServiceName'
-      Cpu: 1024
-      Family: !Ref ServiceName
-      Memory: 4096
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-        - FARGATE
-      RuntimePlatform:
-        CpuArchitecture: "X86_64"
-        OperatingSystemFamily: "LINUX"
-      Tags:
-        - Key: "application"
-          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
-        - Key: "environment"
-          Value: !Ref ApplicationEnvironmentType
   ECSApiService:
     Type: 'AWS::ECS::Service'
     DependsOn:
@@ -465,32 +412,6 @@ Resources:
         Value: 100
       Service: !Ref ECSApiService
       TaskDefinition: !Ref BlueTaskDefinition
-  GreenTaskSet:
-    Type: 'AWS::ECS::TaskSet'
-    DependsOn:
-      - ECSApiCluster
-      - ECSApiService
-      - ALBTargetGroupGreen
-      - GreenTaskDefinition
-    Properties:
-      Cluster: !Ref ECSApiCluster
-      LaunchType: FARGATE
-      LoadBalancers:
-        - ContainerName: !Ref ContainerName
-          ContainerPort: 80
-          TargetGroupArn: !Ref ALBTargetGroupGreen
-      NetworkConfiguration:
-        AwsVpcConfiguration:
-          AssignPublicIp: ENABLED
-          SecurityGroups:
-            - !Ref SecurityGroup
-          Subnets: !Ref Subnets
-      PlatformVersion: "LATEST"
-      Scale:
-        Unit: PERCENT
-        Value: 100
-      Service: !Ref ECSApiService
-      TaskDefinition: !Ref GreenTaskDefinition
   ApiPrimaryTaskSet:
     Type: 'AWS::ECS::PrimaryTaskSet'
     DependsOn:
