@@ -1,0 +1,55 @@
+Parameters:
+  Vpc:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: "The VPC ID for the application."
+  Subnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: "The subnet IDs for the application."
+Resources:
+  CommonALB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    DeletionPolicy: Retain
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets: !Ref Subnets
+      Tags:
+        - Key: Group
+          Value: GrondaApi
+      Type: application
+      IpAddressType: ipv4
+  ALBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    DeletionPolicy: Retain
+    Properties:
+      GroupDescription: Security group for gronda api load balancer
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+  ALBListenerProdTraffic:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: fixed-response
+          FixedResponseConfig:
+            ContentType: 'text/plain'
+            MessageBody: 'Service is not available'
+            StatusCode: '503'
+      LoadBalancerArn: !Ref CommonALB
+      Port: 80
+      Protocol: HTTP
+Outputs:
+  CommonALB:
+    Description: The ARN of the load balancer to attach to the service.
+    Value: !Ref CommonALB
+    Export:
+      Name: !Sub ${AWS::StackName}-CommonALB
+  CommonTrafficRule:
+    Description: The ARN of the listener rule to attach to the service.
+    Value: !Ref ALBListenerProdTraffic
+    Export:
+      Name: !Sub ${AWS::StackName}-CommonTrafficRule

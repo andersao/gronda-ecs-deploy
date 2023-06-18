@@ -1,0 +1,428 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Gronda API ECS Stack"
+Parameters:
+  Vpc:
+    Type: 'AWS::EC2::VPC::Id'
+    Description: "The VPC ID for the application."
+  Subnets:
+    Type: 'List<AWS::EC2::Subnet::Id>'
+    Description: "The subnet IDs for the application."
+  SecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup::Id'
+    Description: "The security group ID for the application."
+  ContainerCpu:
+    Type: 'String'
+    Description: "The Docker ECS task CPU for the application."
+    Default: '1024'
+  ContainerMemory:
+    Type: 'String'
+    Description: "The Docker ECS task memory for the application."
+    Default: '4096'
+  ImageUrl:
+    Type: 'String'
+    Description: "The Docker image for the application."
+  ContainerName:
+    Type: 'String'
+    Description: "The Docker container name for the application."
+  AppHost:
+    Type: 'String'
+    Description: "The host for the application."
+    AllowedPattern: '^([a-z0-9-]+\.)*[a-z0-9-]+$'
+  AppEnv:
+    Type: 'String'
+    Description: "The environment name for the application."
+    AllowedValues:
+      - 'develop'
+      - 'production'
+  AppCacheDriver:
+    Type: 'String'
+    Description: "The cache driver for the application."
+    Default: 'redis'
+    AllowedValues:
+      - 'redis'
+  AppQueueConnection:
+    Type: 'String'
+    Description: "The queue connection for the application."
+    Default: 'redis'
+    AllowedValues:
+      - 'redis'
+  AppRedisHost:
+    Type: 'String'
+    Description: "The Redis host for the application."
+    AllowedPattern: '^([a-z0-9-]+\.)*[a-z0-9-]+$'
+  AppRedisPort:
+    Type: 'Number'
+    Description: "The Redis port for the application."
+    Default: 6379
+  AppSecretManagerId:
+    Type: 'String'
+    Description: "The secret manager ID for the application."
+  ServiceName:
+    Type: String
+    Description: A human-readable name for the service.
+  DeployBucket:
+    Type: String
+    Description: The S3 bucket for the deployment.
+  ApplicationDesiredCount:
+    Type: Number
+    Description: The desired count of the application.
+    Default: 1
+  ApplicationMaxCapacity:
+    Type: Number
+    Description: The max count of the application.
+    Default: 1
+  ApplicationMinCapacity:
+    Type: Number
+    Description: The min count of the application.
+    Default: 1
+  ApplicationTargetValue:
+    Type: Number
+    Description: The CPU target value of the application for autoscaling.
+    Default: 75
+  ApplicationPriority:
+    Type: Number
+    Description: The priority of the application for the load balancer.
+    Default: 1
+  ApplicationTaskRoleArn:
+    Type: 'String'
+    Description: The task role ARN of the application.
+  ApplicationEnvironmentType:
+    Type: 'String'
+    Description: "The purpose of the environment."
+    Default: 'development'
+    AllowedValues:
+      - 'development'
+      - 'production'
+  CommonStackName:
+    Type: 'String'
+    Description: "Common stack name"
+    Default: 'gronda-api-ecs-common'
+Transform:
+  - 'AWS::CodeDeployBlueGreen'
+Hooks:
+  CodeDeployBlueGreenHook:
+    Properties:
+      TrafficRoutingConfig:
+        Type: TimeBasedCanary
+        TimeBasedCanary:
+          StepPercentage: 15
+          BakeTimeMins: 5
+      Applications:
+        - Target:
+            Type: 'AWS::ECS::Service'
+            LogicalID: ECSApiService
+          ECSAttributes:
+            TaskDefinitions:
+              - BlueTaskDefinition
+              - GreenTaskDefinition
+            TaskSets:
+              - BlueTaskSet
+              - GreenTaskSet
+            TrafficRouting:
+              ProdTrafficRoute:
+                Type: 'AWS::ElasticLoadBalancingV2::Listener'
+                LogicalID: ALBListenerProdTraffic
+              TargetGroups:
+                - ALBTargetGroupBlue
+                - ALBTargetGroupGreen
+    Type: 'AWS::CodeDeploy::BlueGreen'
+Resources:
+  ALBTargetGroupBlue:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub '${ServiceName}-blue'
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /health-check
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Port: 80
+      Protocol: HTTP
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+      TargetType: ip
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref Vpc
+  ALBTargetGroupGreen:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      Name: !Sub '${ServiceName}-green'
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /health-check
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      Matcher:
+        HttpCode: '200'
+      Port: 80
+      Protocol: HTTP
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+      TargetType: ip
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref Vpc
+  ALBListenerProdRule:
+    Type: 'AWS::ElasticLoadBalancingV2::ListenerRule'
+    Properties:
+      Actions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref ALBTargetGroupBlue
+                Weight: 1
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values:
+              - !Ref AppHost
+      ListenerArn:
+        Fn::ImportValue:
+          Fn::Sub: '${CommonStackName}-CommonTrafficRule'
+      Priority: !Ref ApplicationPriority
+  ECSTaskExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
+  ECSApiCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Sub 'gronda-api-cluster-${ApplicationEnvironmentType}'
+      CapacityProviders:
+        - FARGATE
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+      ServiceConnectDefaults:
+        Namespace: !Sub 'gronda-api-cluster-${ApplicationEnvironmentType}'
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+  BlueTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    UpdateReplacePolicy: Retain
+    Properties:
+      ExecutionRoleArn: !GetAtt
+        - ECSTaskExecutionRole
+        - Arn
+      TaskRoleArn: !Ref ApplicationTaskRoleArn
+      ContainerDefinitions:
+        - Name: !Ref ContainerName
+          Image: !Ref ImageUrl
+          Essential: true
+          PortMappings:
+            - HostPort: 80
+              Protocol: tcp
+              ContainerPort: 80
+              AppProtocol: http
+              Name: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+          Environment:
+            - Name: APP_ENV
+              Value: !Ref AppEnv
+            - Name: CACHE_DRIVER
+              Value: !Ref AppCacheDriver
+            - Name: QUEUE_CONNECTION
+              Value: !Ref AppQueueConnection
+            - Name: REDIS_HOST
+              Value: !Ref AppRedisHost
+            - Name: REDIS_PORT
+              Value: !Ref AppRedisPort
+            - Name: SECRET_MANAGER_ID
+              Value: !Ref AppSecretManagerId
+            - Name: LOG_CHANNEL
+              Value: 'stderr'
+          LogConfiguration:
+            LogDriver: 'awslogs'
+            Options:
+              awslogs-group: !Ref 'ServiceName'
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Ref 'ServiceName'
+      Cpu: 1024
+      Family: !Ref ServiceName
+      Memory: 4096
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: "X86_64"
+        OperatingSystemFamily: "LINUX"
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+  ECSApiService:
+    Type: 'AWS::ECS::Service'
+    DependsOn:
+      - ECSApiCluster
+      - ALBTargetGroupBlue
+      - ALBTargetGroupGreen
+      - BlueTaskDefinition
+    Properties:
+      Cluster: !Ref ECSApiCluster
+      TaskDefinition: !Ref BlueTaskDefinition
+      LaunchType: FARGATE
+      ServiceName: !Ref ServiceName
+      SchedulingStrategy: REPLICA
+      DesiredCount: !Ref ApplicationDesiredCount
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName
+          ContainerPort: 80
+          LoadBalancerName: !Ref "AWS::NoValue"
+          TargetGroupArn: !GetAtt ALBTargetGroupBlue.TargetGroupArn
+      HealthCheckGracePeriodSeconds: 5
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref SecurityGroup
+          Subnets: !Ref Subnets
+      DeploymentConfiguration:
+        MaximumPercent: !Ref ApplicationMaxCapacity
+        MinimumHealthyPercent: !Ref ApplicationMinCapacity
+      PlatformVersion: "LATEST"
+      DeploymentController:
+        Type: CODE_DEPLOY
+      ServiceConnectConfiguration:
+        Enabled: false
+      EnableECSManagedTags: true
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref 'ServiceName'
+      RetentionInDays: 7
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+  CodeDeployApplication:
+    Type: 'AWS::CodeDeploy::Application'
+    Properties:
+      ApplicationName: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}-blue'
+      ComputePlatform: "ECS"
+      Tags:
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
+  CodeDeployDeploymentGroup:
+    Type: 'AWS::CodeDeploy::DeploymentGroup'
+    DependsOn:
+      - CodeDeployApplication
+      - ALBTargetGroupBlue
+      - ALBTargetGroupGreen
+      - ECSApiCluster
+      - ECSApiService
+    Properties:
+      ApplicationName: !Ref CodeDeployApplication
+      DeploymentGroupName: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}-blue'
+      DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
+      AutoRollbackConfiguration:
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      DeploymentStyle:
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+        DeploymentType: BLUE_GREEN
+      OutdatedInstancesStrategy: UPDATE
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+          WaitTimeInMinutes: 0
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: 5
+      LoadBalancerInfo:
+        TargetGroupPairInfoList:
+          - TargetGroups:
+              - Name: !Ref ALBTargetGroupBlue
+              - Name: !Ref ALBTargetGroupGreen
+            ProdTrafficRoute:
+              ListenerArns:
+                - Fn::ImportValue:
+                    Fn::Sub: '${CommonStackName}-CommonTrafficRule'
+      ECSServices:
+        - ClusterName: !Ref ECSApiCluster
+          ServiceName: !Ref ServiceName
+      ServiceRoleArn:
+        Fn::GetAtt: CodeDeployServiceRole.Arn
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codedeploy.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole
+        - arn:aws:iam::aws:policy/AWSCodeDeployRoleForECS
+  BlueTaskSet:
+    Type: 'AWS::ECS::TaskSet'
+    DependsOn:
+      - ECSApiCluster
+      - ECSApiService
+      - ALBTargetGroupBlue
+      - BlueTaskDefinition
+    Properties:
+      Cluster: !Ref ECSApiCluster
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Ref ContainerName
+          ContainerPort: 80
+          TargetGroupArn: !Ref ALBTargetGroupBlue
+      NetworkConfiguration:
+        AwsVpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref SecurityGroup
+          Subnets: !Ref Subnets
+      PlatformVersion: "LATEST"
+      Scale:
+        Unit: PERCENT
+        Value: 100
+      Service: !Ref ECSApiService
+      TaskDefinition: !Ref BlueTaskDefinition
+  ApiPrimaryTaskSet:
+    Type: 'AWS::ECS::PrimaryTaskSet'
+    DependsOn:
+      - ECSApiCluster
+      - ECSApiService
+    Properties:
+      Cluster: !Ref ECSApiCluster
+      Service: !Ref ECSApiService
+      TaskSetId: !GetAtt BlueTaskSet.Id
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
