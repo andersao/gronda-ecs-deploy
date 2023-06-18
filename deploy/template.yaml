@@ -324,11 +324,6 @@ Resources:
       Cluster: !Ref ECSApiCluster
       Service: !Ref ECSApiService
       TaskSetId: !GetAtt BlueTaskSet.Id
-      Tags:
-        - Key: "application"
-          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
-        - Key: "environment"
-          Value: !Ref ApplicationEnvironmentType
   LogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
