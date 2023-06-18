@@ -281,10 +281,7 @@ Resources:
       - BlueTaskDefinition
     Properties:
       Cluster: !Ref ECSApiCluster
-      LaunchType: FARGATE
-      ServiceName: !Ref ServiceName
       DesiredCount: !Ref ApplicationDesiredCount
-      PlatformVersion: "LATEST"
       DeploymentController:
         Type: EXTERNAL
       Tags:
