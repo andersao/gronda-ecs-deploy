@@ -281,32 +281,12 @@ Resources:
       - BlueTaskDefinition
     Properties:
       Cluster: !Ref ECSApiCluster
-      TaskDefinition: !Ref BlueTaskDefinition
       LaunchType: FARGATE
       ServiceName: !Ref ServiceName
-      SchedulingStrategy: REPLICA
       DesiredCount: !Ref ApplicationDesiredCount
-      LoadBalancers:
-        - ContainerName: !Ref ContainerName
-          ContainerPort: 80
-          LoadBalancerName: !Ref "AWS::NoValue"
-          TargetGroupArn: !GetAtt ALBTargetGroupBlue.TargetGroupArn
-      HealthCheckGracePeriodSeconds: 5
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
-          SecurityGroups:
-            - !Ref SecurityGroup
-          Subnets: !Ref Subnets
-      DeploymentConfiguration:
-        MaximumPercent: !Ref ApplicationMaxCapacity
-        MinimumHealthyPercent: !Ref ApplicationMinCapacity
       PlatformVersion: "LATEST"
       DeploymentController:
         Type: EXTERNAL
-      ServiceConnectConfiguration:
-        Enabled: false
-      EnableECSManagedTags: true
       Tags:
         - Key: "application"
           Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
