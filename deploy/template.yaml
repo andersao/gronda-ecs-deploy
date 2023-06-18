@@ -329,3 +329,13 @@ Resources:
           Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
         - Key: "environment"
           Value: !Ref ApplicationEnvironmentType
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref 'ServiceName'
+      RetentionInDays: 7
+      Tags:
+        - Key: "application"
+          Value: !Sub 'gronda-api-ecs-${ApplicationEnvironmentType}'
+        - Key: "environment"
+          Value: !Ref ApplicationEnvironmentType
